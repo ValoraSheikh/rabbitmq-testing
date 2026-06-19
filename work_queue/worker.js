@@ -12,6 +12,9 @@ async function worker() {
     },
   });
 
+  // declaring the queue in received file is helpful for when I start the consumer script first and need to ensure the queue exists before consuming messages
+  
+
   console.log(" [*] Waiting for messages in %s. To exit press CTRL+C", queue);
   channel.prefetch(1);
   channel.consume(
