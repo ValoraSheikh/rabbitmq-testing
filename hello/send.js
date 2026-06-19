@@ -5,15 +5,20 @@ async function send() {
   const channel = await connection.createChannel();
 
   const queue = "hello";
-  const message = { text: "Hello World!", desc: "This is a test message for first time" };
+  const message = {
+    text: "Hello World!",
+    desc: "This is a test message for first time",
+  };
 
   await channel.assertQueue(queue, { durable: false });
-  channel.sendToQueue(queue, Buffer.from(JSON.stringify(message)))
+  channel.sendToQueue(queue, Buffer.from(JSON.stringify(message)));
 
   console.log(" [x] Sent '%s'", message);
-  
-  // await channel.close();
-  // await connection.close();
+
+  setTimeout(function () {
+    connection.close();
+    process.exit(0);
+  }, 500);
 }
 
 send();

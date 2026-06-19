@@ -8,10 +8,15 @@ async function send() {
   const msg = process.argv.slice(2).join(" ") || "Hello World!";
 
   await channel.assertExchange(exchange, "fanout", { durable: false }); // Fanout exchange means all messages are broadcast to all queues bound to it
-  
+
   channel.publish(exchange, "", Buffer.from(msg)); // Empty string is here telling the we don't need to route the message to a specific queue
 
   console.log(` [x] Sent ${msg}`);
+
+  setTimeout(function () {
+    connection.close();
+    process.exit(0);
+  }, 500);
 }
 
 send();
