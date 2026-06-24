@@ -1,394 +1,234 @@
-# 🐇 RabbitMQ Learning Journey
+# 🐇 RabbitMQ — Learning Journey
 
-This repository contains my RabbitMQ learning notes and practical implementations using **Node.js** and **amqplib**.
-
-The goal of this repository is to understand how message brokers work and how RabbitMQ helps build asynchronous, reliable, and scalable backend systems.
+A hands-on exploration of **RabbitMQ messaging patterns** using **Node.js** and **amqplib**. Each directory demonstrates a progressively advanced pattern, from a simple queue to RPC.
 
 ---
 
-## Why RabbitMQ?
+## 🚀 Getting Started
 
-In normal backend systems:
+### Prerequisites
 
-```
-Client
-  |
-  ↓
-API Server
-  |
-  ↓
-Database / External Services
-```
+- [Node.js](https://nodejs.org/) (v18+)
+- [Docker](https://docker.com/)
 
-The API often performs everything synchronously:
+### Start RabbitMQ
 
-- Generate invoices
-- Send emails
-- Process heavy jobs
-- Run background tasks
-
-RabbitMQ helps move these operations into background workers:
-
-```
-API Server (Producer)
-
-        ↓
-
-     RabbitMQ
-
-        ↓
-
- Workers / Consumers
+```bash
+docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4.2-alpine
 ```
 
-This improves:
+| Port | Purpose |
+|------|---------|
+| `5672` | AMQP (messaging) |
+| `15672` | Management UI (guest/guest) |
 
-- API response time
-- System scalability
-- Fault tolerance
+> **Tip:** Run this in a separate terminal — it stays running while you test the patterns below.
 
----
+### Install Dependencies
 
-# Topics Covered
-
-## 1. Hello World Queue
-
-Basic Producer → Queue → Consumer flow.
-
-Architecture:
-
-```
-Producer
-
-   ↓
-
- Queue
-
-   ↓
-
-Consumer
-```
-
-Concepts learned:
-
-- Creating RabbitMQ connection
-- Creating channels
-- Queue declaration
-- Sending messages
-- Receiving messages
-
-Implemented:
-
-- `send.js`
-- `receive.js`
-
----
-
-# 2. Work Queues
-
-Used for distributing time-consuming tasks among multiple workers.
-
-Architecture:
-
-```
-             Producer
-
-                 ↓
-
-              Queue
-
-        /         \
-
-   Worker 1     Worker 2
-```
-
-Concepts learned:
-
-- Multiple consumers
-- Task distribution
-- Round-robin dispatch
-- Background job processing
-
-Example:
-
-```
-Task 1 → Worker 1
-Task 2 → Worker 2
-Task 3 → Worker 1
+```bash
+npm install
 ```
 
 ---
 
-# 3. Message Acknowledgement (ACK)
+## 📦 Patterns Overview
 
-Ensuring messages are not lost when workers fail.
+### 1. Hello World — Simple Queue
 
-Without ACK:
-
-```
-Worker receives message
-
-       ↓
-
-Worker crashes ❌
-
-       ↓
-
-Message lost
-```
-
-With ACK:
+The most basic setup: one producer, one queue, one consumer.
 
 ```
-Worker receives message
-
-       ↓
-
-Process completed
-
-       ↓
-
-channel.ack(message)
-
-       ↓
-
-RabbitMQ removes message
+┌──────────┐     ┌───────┐     ┌───────────┐
+│  send.js │ ──→ │ hello │ ──→ │ receive.js│
+│(Producer)│     │ Queue │     │(Consumer) │
+└──────────┘     └──────┘     └───────────┘
 ```
 
-Concepts:
+```bash
+node hello/receive.js      # Terminal 1 — start consumer
+node hello/send.js         # Terminal 2 — send a message
+```
 
-- noAck
-- Manual acknowledgement
-- Message reliability
+**Key takeaway:** Queue is **non-durable**, consumer uses **auto-ack**.
 
 ---
 
-# 4. Durable Queues & Persistent Messages
+### 2. Work Queue — Fair Task Distribution
 
-Making queues and messages survive RabbitMQ restarts.
+Distributes time-consuming tasks across multiple workers using round-robin dispatch.
 
-Queue durability:
-
-```javascript
-channel.assertQueue("task_queue", {
-  durable:true
-});
+```
+┌────────────┐     ┌────────────┐
+│ new_task.js│ ──→ │ task_queue │ ──→ worker.js 1
+│ (Producer) │     │ (Quorum)   │ ──→ worker.js 2
+└────────────┘     └────────────┘ ──→ worker.js 3
 ```
 
-Message persistence:
-
-```javascript
-channel.sendToQueue(
- queue,
- Buffer.from(message),
- {
-   persistent:true
- }
-);
+```bash
+node work_queue/worker.js              # Terminal 1 — start Worker A
+node work_queue/worker.js              # Terminal 2 — start Worker B
+node work_queue/new_task.js First..... # Terminal 3 — task with 5s duration
+node work_queue/new_task.js Second..   # Terminal 3 — task with 2s duration
 ```
 
-Concepts:
-
-- Durable queues
-- Persistent messages
-- Reliable delivery
+**Key takeaway:** Durable **quorum queue**, **persistent messages**, **manual ACK**, and **prefetch(1)** for fair dispatch.
 
 ---
 
-# 5. Fair Dispatch
+### 3. Fanout Exchange — Publish / Subscribe
 
-Preventing one worker from getting overloaded.
-
-Implemented using:
-
-```javascript
-channel.prefetch(1);
-```
-
-Before:
+Broadcasts every message to **all** consumers. Perfect for notifications, logging, or live feeds.
 
 ```
-Worker 1
-Task 1
-Task 3
-Task 5
-
-
-Worker 2
-Task 2
-Task 4
+┌──────────┐     ┌──────────────────┐     ┌────────────────┐
+│ emit_log │ ──→ │ Exchange: logs   │ ──→ │ Queue (temp 1) │ ──→ receive 1
+│(Producer)│     │ (fanout)         │ ──→ │ Queue (temp 2) │ ──→ receive 2
+└──────────┘     └──────────────────┘     └────────────────┘
 ```
 
-After:
+```bash
+node publish-subscribe-fanout/receive_logs.js  # Terminal 1
+node publish-subscribe-fanout/receive_logs.js  # Terminal 2
+node publish-subscribe-fanout/emit_log.js "Hi everyone!"  # Terminal 3
+```
 
-RabbitMQ sends new work only when a worker finishes previous work.
-
-Concepts:
-
-- Worker load balancing
-- Prefetch count
-- Unacknowledged messages
+**Key takeaway:** Routing key is **ignored** in fanout — every bound queue gets every message.
 
 ---
 
-# 6. Exchanges
+### 4. Direct Exchange — Selective Routing
 
-Instead of sending directly to queues:
+Routes messages to queues whose **binding key** exactly matches the message's **routing key**.
 
 ```
-Producer
-
-   ↓
-
-Exchange
-
-   ↓
-
-Queue
-
-   ↓
-
-Consumer
+┌────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│ emit_log_direct│ ──→ │ Exchange: direct │ ──→ │ "info" queue   │
+│  (Producer)    │     │   _logs (direct)  │ ──→ │ "white" queue  │
+└────────────────┘     └──────────────────┘     └────────────────┘
 ```
 
-Exchange decides where messages should go.
+```bash
+node public-subscribe-direct/receive_logs_direct.js info    # Terminal 1 — listens for "info"
+node public-subscribe-direct/receive.js white               # Terminal 2 — listens for "white"
+node public-subscribe-direct/emit_log_direct.js error "Oops!" # Terminal 3
+```
 
-Learned exchange types:
-
-- Fanout Exchange
-- Direct Exchange
+**Key takeaway:** Only queues with a **matching binding key** receive the message. Messages with unmatched keys are **lost**.
 
 ---
 
-# 7. Fanout Exchange (Publish / Subscribe)
+### 5. Topic Exchange — Pattern‑based Routing
 
-Broadcast one message to multiple consumers.
-
-Architecture:
+Routes messages using wildcard patterns (`*` = one word, `#` = zero or more words).
 
 ```
-             Producer
-
-                 ↓
-
-              Exchange
-
-          /       |       \
-
-      Queue1   Queue2   Queue3
-
-        ↓        ↓        ↓
-
-    Consumer Consumer Consumer
+         ┌──────────────────┐
+         │  Exchange: topic │
+         │    _logs (topic) │
+         └────────┬─────────┘
+                  │
+        ┌─────────┴──────────┐
+        │                    │
+   "kern.*"           "*.critical"
+        │                    │
+   kernel msgs          critical msgs
 ```
 
-Concepts:
+```bash
+node publish-subscribe-topic/receive_logs_topic.js "kern.*" "*.critical"  # Terminal 1
+node publish-subscribe-topic/emit_log_topic.js "kern.critical" "Kernel panic!"  # Terminal 2
+```
 
-- Publish / Subscribe pattern
-- Broadcasting messages
-- Temporary queues
-- Queue bindings
-
-Used for:
-
-- Notifications
-- Logging systems
-- Event broadcasting
+**Key takeaway:** `*` matches exactly **one** word (dot-separated), `#` matches **zero or more** words.
 
 ---
 
-# 8. Direct Exchange
+### 6. RPC — Remote Procedure Call
 
-Routing messages using routing keys.
-
-Architecture:
+Requests a remote computation (Fibonacci) and waits for a response — all over RabbitMQ.
 
 ```
-Producer
-
-   ↓
-   
-Exchange
-
-   ↓ routing key match
-
-Queue
-
-   ↓
-
-Consumer
+┌────────────┐     ┌──────────┐     ┌────────────┐
+│ rpc_client │ ──→ │ rpc_queue│ ──→ │ rpc_server │
+│ (Producer) │     │ (Quorum) │     │ (Consumer) │
+└──────┬─────┘     └──────────┘     └──────┬─────┘
+       │  correlationId + replyTo          │
+       └───────────────────────────────────┘
+         Direct Reply-to (amq.rabbitmq.reply-to)
 ```
 
-Example:
-
-Producer:
-
-```
-routingKey = "error"
+```bash
+node rpc/rpc_server.js              # Terminal 1 — start RPC server
+node rpc/rpc_client.js 10           # Terminal 2 — request fib(10)
+node rpc/rpc_client.js 20           # Terminal 2 — request fib(20)
 ```
 
-Bindings:
-
-```
-info_queue  -> info
-
-error_queue -> error
-```
-
-Only matching queues receive messages.
-
-Concepts:
-
-- Routing keys
-- Binding keys
-- Selective message routing
+**Key takeaway:** Uses `correlationId` to match requests to responses and RabbitMQ's **Direct Reply-to** (`amq.rabbitmq.reply-to`) instead of declaring a callback queue.
 
 ---
 
-# RabbitMQ Concepts Learned
+## 🧠 Concepts Learned
 
-✔ Producer  
-✔ Consumer  
-✔ Worker  
-✔ Queue  
-✔ Channel  
-✔ Exchange  
-✔ Binding  
-✔ Routing Key  
-✔ Work Queue Pattern  
-✔ Publish/Subscribe Pattern  
-✔ Fanout Exchange  
-✔ Direct Exchange  
-✔ Message Acknowledgement  
-✔ Durable Queue  
-✔ Persistent Message  
-✔ Fair Dispatch  
-✔ Prefetch  
+| Concept | Pattern | Description |
+|---------|---------|-------------|
+| Producer | All | Sends messages to an exchange or queue |
+| Consumer | All | Receives and processes messages |
+| Queue | Hello, Work Queue | Named message buffer |
+| Exchange | Fanout, Direct, Topic | Routes messages to queues |
+| Binding | Fanout, Direct, Topic | Links a queue to an exchange |
+| Routing Key | Direct, Topic | Determines which queue gets a message |
+| ACK | Work Queue, RPC | Confirms message was processed |
+| Prefetch | Work Queue, RPC | Limits unacked messages per consumer |
+| Durability | Work Queue, RPC | Queue/message survives broker restart |
+| Quorum Queue | Work Queue, RPC | Replicated, highly-available queue type |
+| Correlation ID | RPC | Matches requests to responses |
+| Direct Reply-to | RPC | RabbitMQ built-in reply mechanism |
 
 ---
 
-# Tech Stack
+## 🗺️ Learning Progression
 
-- Node.js
-- RabbitMQ
-- amqplib
-- Docker
+```
+Hello World   ──→   Work Queue   ──→   Fanout  ──→   Direct  ──→   Topic  ──→   RPC
+(simple)        (distribution)       (broadcast)   (routing)    (patterns)   (request/reply)
+```
 
----
-
-# Future Topics
-
-Things I plan to explore:
-
-- Topic Exchange
-- Dead Letter Queue (DLQ)
-- Retry Pattern
-- Delayed Messages
-- RabbitMQ with Microservices
-- Production RabbitMQ Patterns
+Each pattern builds on the previous, introducing **one or two new RabbitMQ concepts** at a time.
 
 ---
 
-## Goal
+## 🛠 Tech Stack
 
-Understand how real-world backend systems use messaging patterns to build scalable event-driven architectures.
+- **Runtime:** Node.js (ES Modules)
+- **Broker:** RabbitMQ (via Docker)
+- **Client:** [amqplib](https://www.npmjs.com/package/amqplib) ^2.0.1
+
+---
+
+## 📁 Project Structure
+
+```
+rabbitmq/
+├── hello/                          # Pattern 1: Simple Queue
+│   ├── send.js
+│   └── receive.js
+├── work_queue/                     # Pattern 2: Work Queue
+│   ├── new_task.js
+│   └── worker.js
+├── publish-subscribe-fanout/       # Pattern 3: Fanout Exchange
+│   ├── emit_log.js
+│   └── receive_logs.js
+├── public-subscribe-direct/        # Pattern 4: Direct Exchange
+│   ├── emit_log_direct.js
+│   ├── receive_logs_direct.js
+│   └── receive.js
+├── publish-subscribe-topic/        # Pattern 5: Topic Exchange
+│   ├── emit_log_topic.js
+│   └── receive_logs_topic.js
+├── rpc/                            # Pattern 6: RPC
+│   ├── rpc_client.js
+│   └── rpc_server.js
+├── package.json
+└── readme.md
+```
